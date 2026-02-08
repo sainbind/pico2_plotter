@@ -1,0 +1,8 @@
+iniconfig==2.3.0
+micropython-rp2-rpi_pico2_w-stubs==1.27.0.post1
+micropython-stdlib-stubs==1.27.0
+packaging==25.0
+pluggy==1.6.0
+Pygments==2.19.2
+pytest==9.0.2
+ulogging==1.1.0

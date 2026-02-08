@@ -1,0 +1,83 @@
+<html>
+<head>
+<style>
+    .control {
+      width: 80px;
+      height: 80px;
+      background: #DDD;
+      border: 2px solid white;
+      justify-content: center; /* horizontal centering */
+      align-items: center;     /* vertical centering */
+    }
+    .container {
+      width: 100%;
+      max-width: 960px;
+      margin: 0 auto;
+      padding: 0 15px;
+    }
+    .row {
+      display: flex;
+      flex-wrap: wrap;
+      margin-left: -15px;
+      margin-right: -15px;
+    }
+    .col {
+      flex: 1;
+      padding: 15px;
+      min-width: 0;
+    }
+    @media (max-width: 600px) {
+      .row {
+        flex-direction: column;
+      }
+    }
+  </style>
+</head>
+<body>
+<title>MicroPlotter</title>
+
+<h1>Microplotter</h1>
+
+<p>Status: {{status}}</p>
+<div class="row">
+    <div class="col">
+        <h2>Jog Controls</h2>
+        <div class="row">
+            <div class="control">
+            </div>
+            <div class="control">
+            <a href="/api/up">Up</a>
+            </div>
+            <div class="control">
+            </div>
+        </div>
+        
+        <div class="row">
+            <div class="control">
+            <a href="/api/left">Left</a>
+            </div>
+            <div class="control">
+            <a href="/api/home">Home</a>
+            </div>
+            <div class="control">
+            <a href="/api/right">Right</a>
+            </div>
+        </div>
+        
+        <div class="row">
+            <div class="control">
+            <a href="/api/zero">Zero</a>
+            </div>
+            <div class="control">
+            <a href="/api/down">Down</a>
+            </div>
+            <div class="control">
+            </div>
+        </div>
+    </div>
+    <div class="col">
+        <h2>Terminal</h2>
+    </div>
+</div>
+</body>
+</html>
