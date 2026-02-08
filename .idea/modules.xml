@@ -2,7 +2,7 @@
 <project version="4">
   <component name="ProjectModuleManager">
     <modules>
-      <module fileurl="file://$PROJECT_DIR$/.idea/PicoPlotter.iml" filepath="$PROJECT_DIR$/.idea/PicoPlotter.iml" />
+      <module fileurl="file://$PROJECT_DIR$/.idea/pico2_plotter.iml" filepath="$PROJECT_DIR$/.idea/pico2_plotter.iml" />
     </modules>
   </component>
 </project>
