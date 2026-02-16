@@ -3,7 +3,7 @@
 # 28 June 2025
 
 import sys, select
-
+from gcode_machine import GCodeMachine
 from time_compat import tick_millis, ticks_diff, sleep_secs
 #from enum import StrEnum
 from point import Point
@@ -11,6 +11,175 @@ from logging_compat import get_logger, logging
 
 
 
+# IO abstraction layer -----------------------------------------------------
+class IOBase:
+    """Abstract IO handler. Provide read_line(blocking=True), write(s), any(),
+    and optionally get_fileno() for integration with select.poll().
+    """
+    def read_line(self, blocking=True):
+        raise NotImplementedError
+
+    def write(self, s: str):
+        raise NotImplementedError
+
+    def any(self) -> bool:
+        """Return True if there's data available to read without blocking.
+        If not implementable, return True to let caller attempt a read.
+        """
+        return True
+
+    def get_fileno(self):
+        """Return a file descriptor integer usable with select.poll(), or None.
+        """
+        return None
+
+
+class StdioIO(IOBase):
+    """Standard input/output handler using sys.stdin/sys.stdout.
+    Works with both blocking and (with select) non-blocking modes.
+    """
+    def __init__(self):
+        # cached poll object (if poll is available and registration succeeds)
+        self._poll = None
+
+    def read_line(self, blocking=True):
+        if blocking:
+            try:
+                return input("")
+            except EOFError:
+                return None
+        else:
+            # Non-blocking read; caller should check any() or poll first.
+            try:
+                line = sys.stdin.readline()
+            except Exception:
+                return None
+            if line == "":
+                return None
+            return line.rstrip('\n')
+
+    def write(self, s: str):
+        try:
+            sys.stdout.write(s)
+        except Exception:
+            # Best-effort: ignore write errors
+            pass
+
+    def any(self) -> bool:
+        # Prefer a poll-based check when possible (more efficient / scalable).
+        try:
+            fileno = self.get_fileno()
+        except Exception:
+            fileno = None
+
+        # Use select.poll where available and we have a fileno
+        try:
+            if fileno is not None and hasattr(select, 'poll'):
+                # Cache a poll object on this StdioIO instance to avoid recreating it each call
+                if self._poll is None:
+                    try:
+                        self._poll = select.poll()
+                        self._poll.register(fileno, select.POLLIN)
+                    except Exception:
+                        # If poll/register fails, clear _poll and fall back
+                        self._poll = None
+                if self._poll is not None:
+                    events = self._poll.poll(0)
+                    return bool(events)
+        except Exception:
+            # Fall through to select.select fallback
+            pass
+
+        # Fallback: if poll isn't available or failed, be conservative and assume data may be available
+        # (This avoids platform-specific select.select unpacking warnings in static analyzers.)
+        return True
+
+    def get_fileno(self):
+        try:
+            fd = sys.stdin.fileno()
+            # sanitize: ensure we got an int
+            if isinstance(fd, int) and fd >= 0:
+                return fd
+            return None
+        except Exception:
+            return None
+
+
+class FileIO(IOBase):
+    """Read lines from a file path. Writes still go to stdout by default.
+    """
+    def __init__(self, path, write_to_stdout=True):
+        self._lines = []
+        self._pos = 0
+        self.write_to_stdout = write_to_stdout
+        try:
+            with open(path, 'r') as f:
+                self._lines = [ln.rstrip('\n') for ln in f.readlines()]
+        except Exception:
+            self._lines = []
+
+    def read_line(self, blocking=True):
+        if self._pos >= len(self._lines):
+            return None
+        val = self._lines[self._pos]
+        self._pos += 1
+        return val
+
+    def any(self) -> bool:
+        return self._pos < len(self._lines)
+
+    def write(self, s: str):
+        if self.write_to_stdout:
+            try:
+                sys.stdout.write(s)
+            except Exception:
+                pass
+
+
+class UARTIO(IOBase):
+    """Wrap a UART-like object that provides any(), readline(), and write().
+    The uart.readline() is expected to return bytes (MicroPython style) or a
+    string (pyserial style)."""
+    def __init__(self, uart):
+        self.uart = uart
+
+    def read_line(self, blocking=True):
+        # On typical uart objects, readline() will block until a line is available
+        try:
+            raw = self.uart.readline()
+        except Exception:
+            return None
+        if raw is None:
+            return None
+        if isinstance(raw, bytes):
+            try:
+                return raw.decode().rstrip('\r\n')
+            except Exception:
+                return raw.decode(errors='ignore').rstrip('\r\n')
+        return str(raw).rstrip('\r\n')
+
+    def any(self) -> bool:
+        try:
+            return bool(self.uart.any())
+        except Exception:
+            # If underlying UART doesn't expose any(), assume data may be present
+            return True
+
+    def write(self, s: str):
+        try:
+            if hasattr(self.uart, 'write'):
+                if isinstance(s, str):
+                    b = s.encode()
+                else:
+                    b = s
+                self.uart.write(b)
+        except Exception:
+            pass
+
+
+
+
+# ...existing code...
 class GcodeInterpreter:
 
 
@@ -26,9 +195,9 @@ class GcodeInterpreter:
         G00 = "g00"
         G1 = "g1"
         G01 = "g01"
-        G02 = "g02"
+        G02 = "g2"
         G2 = "g2"
-        G03 = "g03"
+        G03 = "g3"
         G3 = "g3"
         G21 = "g21"
         G28 = "g28"
@@ -104,7 +273,7 @@ class GcodeInterpreter:
     logger = get_logger("gcode_interpreter")
 
 
-    def __init__(self, machine, use_polling=False):
+    def __init__(self, machine: GCodeMachine, io_handler: IOBase = None, use_polling=False):
         self.machine = machine
         self.banner_sent = False
         self.question_counter = 0
@@ -113,10 +282,29 @@ class GcodeInterpreter:
         self.now = tick_millis()
         self.use_polling = use_polling
 
+        # IO handler: default to standard input/output
+        self.io = io_handler if io_handler is not None else StdioIO()
+
+        # Prepare polling support if requested and supported by the IO handler
         if use_polling:
-            sleep_secs(1)
-            self.poller = select.poll()
-            self.poller.register(sys.stdin, select.POLLIN)
+            # If the io handler exposes a fileno usable with select.poll(), register it
+            fileno = None
+            try:
+                fileno = self.io.get_fileno()
+            except Exception:
+                fileno = None
+
+            if fileno is not None:
+                sleep_secs(1)
+                self.poller = select.poll()
+                try:
+                    self.poller.register(fileno, select.POLLIN)
+                except Exception:
+                    # If register fails, fall back to no poller and rely on io.any()
+                    self.poller = None
+            else:
+                # No fileno available; we'll rely on io.any() for non-blocking checks
+                self.poller = None
         else:
             self.poller = None
 
@@ -131,20 +319,22 @@ class GcodeInterpreter:
         # Send the banner plus three status reports and trailing ok.
         statuses = "".join(self._send_status() for _ in range(3))
         banner = "Grbl 1.1f ['$' for help]\r\n<Idle|MPos:0.000,0.000,0.000|FS:0,0>\r\nMSG: '$X' to unlock]\r\n"
-        sys.stdout.write(banner + statuses + "ok\r\n")
+        self.io.write(banner + statuses + "ok\r\n")
         self.banner_sent = True
         self.last_status_time = tick_millis()
 
     def _soft_reset(self):
         self.banner_sent = False
 
-    @staticmethod
-    def _unlock():
-        """Unlock response on $X"""
-        sys.stdout.write("[MSG:Caution: Unlocked]\r\nok\r\n")
+    def _unlock(self):
+        try:
+            # If there is a running interpreter instance, prefer its io; otherwise stdout
+            self.io.write("[MSG:Caution: Unlocked]\r\nok\r\n")
+        except Exception:
+            pass
 
-    @staticmethod
-    def _settings():
+
+    def _settings(self):
         """response to a $$ command"""
         grbl_settings = (
             (0, 10, "Step pulse, usec"),
@@ -170,17 +360,26 @@ class GcodeInterpreter:
             (31, 0, "Min spindle speed, RPM"),
             (32, 1, "Laser-mode enable, bool"),
         )
-        sys.stdout.write("".join(f"${key}={val} ({desc})\r\n" for (key, val, desc) in grbl_settings) + "ok\r\n")
+        # This static method can't easily access self.io; write to stdout here.
+        try:
+            self.io.write("".join(f"${key}={val} ({desc})\r\n" for (key, val, desc) in grbl_settings) + "ok\r\n")
+        except Exception:
+            pass
 
-    @staticmethod
-    def _help():
-        sys.stdout.write( "".join(f"{key}: {value}\r\n" for (key, value) in GcodeInterpreter.commands))
 
-    @staticmethod
-    def _info():
-        sys.stdout.write("[VER:MicroPythonGRBL:1.1]\r\n")
-        sys.stdout.write("[OPT:MPY,USB,3AXIS]\r\n")
-        sys.stdout.write("ok\r\n")
+    def _help(self):
+        try:
+            self.io.write( "".join(f"{key}: {value}\r\n" for (key, value) in GcodeInterpreter.commands))
+        except Exception:
+            pass
+
+    def _info(self):
+        try:
+            self.io.write("[VER:MicroPythonGRBL:1.1]\r\n")
+            self.io.write("[OPT:MPY,USB,3AXIS]\r\n")
+            self.io.write("ok\r\n")
+        except Exception:
+            pass
 
     def _status(self):
         # Determine if this '?' arrived within the quick-request window
@@ -203,7 +402,7 @@ class GcodeInterpreter:
 
         # After banner has been shown, throttle status replies by STATUS_INTERVAL_MS
         if self.banner_sent and ticks_diff(self.now, self.last_status_time) > GcodeInterpreter.STATUS_INTERVAL_MS:
-            sys.stdout.write(self._send_status())
+            self.io.write(self._send_status())
             self.last_status_time = self.now
 
 
@@ -219,29 +418,41 @@ class GcodeInterpreter:
                     self.question_counter = 0
 
                 # Non-blocking mode: check for input, otherwise allow periodic tasks
-                if self.use_polling:
+                if self.use_polling and self.poller is not None:
                     events = self.poller.poll(0)
                     if not events:
                         # Optionally emit periodic idle status after banner
                         if self.banner_sent and ticks_diff(self.now,
                                                             self.last_status_time) > GcodeInterpreter.STATUS_INTERVAL_MS:
-                            sys.stdout.write(self._send_status())
+                            self.io.write(self._send_status())
                             self.last_status_time = self.now
                         sleep_secs(0.01)
                         continue
                     # Read a single line (poll indicated input available)
-                    line = sys.stdin.readline()
-                    if line == "":
-                        # EOF on stdin
-                        self.logger.debug("EOF on stdin, exiting interpreter")
+                    line = self.io.read_line(blocking=False)
+                    if line is None:
+                        # EOF on stdin or no data
+                        self.logger.debug("EOF on input, exiting interpreter")
                         break
-                    line = line.rstrip("\r\n")
                 else:
-                    # Blocking read; will wait for a line from the host
-                    try:
-                        line = input("")
-                    except EOFError:
-                        break
+                    # If we have a non-poller IO, use its any() to check availability
+                    if self.use_polling and self.poller is None:
+                        if not self.io.any():
+                            # Optionally emit periodic idle status after banner
+                            if self.banner_sent and ticks_diff(self.now, self.last_status_time) > GcodeInterpreter.STATUS_INTERVAL_MS:
+                                self.io.write(self._send_status())
+                                self.last_status_time = self.now
+                            sleep_secs(0.01)
+                            continue
+                        line = self.io.read_line(blocking=False)
+                        if line is None:
+                            self.logger.debug("EOF on input, exiting interpreter")
+                            break
+                    else:
+                        # Blocking read; will wait for a line from the host
+                        line = self.io.read_line(blocking=True)
+                        if line is None:
+                            break
 
                 # Update last_question_time if this looks like a status request
                 stripped = (line or "").strip()
@@ -256,7 +467,7 @@ class GcodeInterpreter:
                 except KeyboardInterrupt:
                     break
                 except Exception as e:
-                    sys.stdout.write("error: {}\r\n".format(e))
+                    self.io.write("error: {}\r\n".format(e))
 
         except KeyboardInterrupt:
             # clean exit on Ctrl-C
@@ -265,7 +476,7 @@ class GcodeInterpreter:
         finally:
             # Ensure machine is properly shut down
             try:
-                sys.stdout.write("ended interpreter\r\n")
+                self.io.write("ended interpreter\r\n")
                 self.machine.end()
             except Exception:
                 pass
@@ -301,7 +512,7 @@ class GcodeInterpreter:
         try:
             sub_command = GcodeInterpreter.GCodeCommands.get_command(sub_commands[0])
         except ValueError:
-            sys.stdout.write(f"Unknown G-code command: {command}\r\n")
+            self.io.write(f"Unknown G-code command: {command}\r\n")
             return
         ## Originally I used enumStr matching for this, but it's not supported with MicroPython
         #     match sub_command:
@@ -315,42 +526,42 @@ class GcodeInterpreter:
             params = self._parse_command_params(sub_commands[1:])
             self.machine.penup()
             self.machine.move(params['x'], params['y'])
-            sys.stdout.write("ok\r\n")
+            self.io.write("ok\r\n")
 
         elif sub_command in (GcodeInterpreter.GCodeCommands.G01,
                              GcodeInterpreter.GCodeCommands.G1):
             params = self._parse_command_params(sub_commands[1:])
             self.machine.pendown()
             self.machine.move(params['x'], params['y'])
-            sys.stdout.write("ok\r\n")
+            self.io.write("ok\r\n")
 
         elif sub_command in (GcodeInterpreter.GCodeCommands.G02,
                              GcodeInterpreter.GCodeCommands.G2):
             params = self._parse_command_params(sub_commands[1:])
             self.machine.circle(Point(params['x'], params['y']), params['r'], is_clockwise=True)
-            sys.stdout.write("ok\r\n")
+            self.io.write("ok\r\n")
 
         elif sub_command in (GcodeInterpreter.GCodeCommands.G03,
                              GcodeInterpreter.GCodeCommands.G3):
             params = self._parse_command_params(sub_commands[1:])
             self.machine.circle(Point(params['x'], params['y']), params['r'], is_clockwise=False)
-            sys.stdout.write("ok\r\n")
+            self.io.write("ok\r\n")
 
         elif sub_command == GcodeInterpreter.GCodeCommands.G21:
-            sys.stdout.write("ok\r\n")
+            self.io.write("ok\r\n")
 
         elif sub_command in (GcodeInterpreter.GCodeCommands.G28,
                              GcodeInterpreter.GCodeCommands.HOME):
             self.machine.home()
-            sys.stdout.write("ok\r\n")
+            self.io.write("ok\r\n")
 
         elif sub_command == GcodeInterpreter.GCodeCommands.G90:
             self.machine.relative_mode = False
-            sys.stdout.write("ok\r\n")
+            self.io.write("ok\r\n")
 
         elif sub_command == GcodeInterpreter.GCodeCommands.G91:
             self.machine.relative_mode = True
-            sys.stdout.write("ok\r\n")
+            self.io.write("ok\r\n")
 
         elif sub_command == GcodeInterpreter.GCodeCommands.M30:
             raise KeyboardInterrupt
@@ -359,17 +570,20 @@ class GcodeInterpreter:
             self._status()
 
         elif sub_command == GcodeInterpreter.GCodeCommands.SETTINGS:
-            GcodeInterpreter._settings()
+            # Call instance method so it uses the configured io handler
+            self._settings()
 
         elif sub_command == GcodeInterpreter.GCodeCommands.INFO:
-            GcodeInterpreter._info()
+            self._info()
 
         elif sub_command == GcodeInterpreter.GCodeCommands.HELP:
-            GcodeInterpreter._help()
+            self._help()
 
         elif sub_command == GcodeInterpreter.GCodeCommands.UNLOCK:
-            GcodeInterpreter._unlock()
+            self._unlock()
 
         else:
-            sys.stdout.write(f"Unknown G-code command: {command}")
+            self.io.write(f"Unknown G-code command: {command}")
+
+
 

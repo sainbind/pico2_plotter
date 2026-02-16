@@ -51,10 +51,15 @@ class MplotGCodeMachine(GCodeMachine):
             next_point =  Point(0 if x is None else x, 0 if y is None else y).add(current_point)
         else:
             next_point = Point(self.absolute_x if x is None else x, self.absolute_y if y is None else y)
-        color = 'black' if self.is_pendown else 'white'
-        nx = np.array([self.absolute_x,next_point.x])
-        ny = np.array([self.absolute_y,next_point.y])
-        self.plt.plot(nx, ny, linestyle='-', linewidth=2, color=color)
+        # Only draw when pen is down. Pen-up moves should not plot a visible stroke;
+        # previously they were drawn in 'white' which could appear gray when over
+        # the grid due to anti-aliasing/blending. It's clearer to skip plotting.
+        if self.is_pendown:
+            nx = np.array([self.absolute_x, next_point.x])
+            ny = np.array([self.absolute_y, next_point.y])
+            self.plt.plot(nx, ny, linestyle='-', linewidth=2, color='black')
+
+        # Update internal position regardless of pen state
         self.absolute_x = next_point.x
         self.absolute_y = next_point.y
 

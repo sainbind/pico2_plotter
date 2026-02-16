@@ -4,7 +4,7 @@
 # 07-Feb-2026
 
 from mplot_gcode_machine import MplotGCodeMachine
-from gcode_interpreter import GcodeInterpreter
+from gcode_interpreter import GcodeInterpreter, FileIO
 from gcode_machine import relative_draw
 
 
@@ -12,7 +12,7 @@ from gcode_machine import relative_draw
 mplot_machine = MplotGCodeMachine(5, 0, 10, 10, 1)
 
 # Attach the gcode interpreter to the turtle machine
-interpreter = GcodeInterpreter(mplot_machine)
+interpreter = GcodeInterpreter(mplot_machine, FileIO("./absolute.gcode"))
 
 # either manually type in gcode commands or read from standard input
 # absolute.gcode uses absolute positioning, relative.gcode uses relative positioning
