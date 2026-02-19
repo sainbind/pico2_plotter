@@ -204,12 +204,14 @@ class GcodeInterpreter:
         G90 = "g90"
         G91 = "g91"
         M30 = "m30"
-        JOG = "j="
+        JOG = "$j="
         UNLOCK = "$x"
         SETTINGS = "$$"
         HOME = "$h"
         HELP = "$"
         INFO = "$i"
+        STATE = "$g"
+        CHECK = "$c"
         STATUS = "?"
         FILE_BOUNDARY = "%"
 
@@ -227,12 +229,14 @@ class GcodeInterpreter:
         "g90": G90,
         "g91": G91,
         "m30": M30,
-        "j=": JOG,
+        "$j=": JOG,
         "$x": UNLOCK,
         "$$": SETTINGS,
         "$h": HOME,
         "$": HELP,
         "$i": INFO,
+        "$g": STATE,
+        "$c": CHECK,
         "?": STATUS,
         "%": FILE_BOUNDARY
         }
@@ -260,16 +264,18 @@ class GcodeInterpreter:
         ("g3", "GRBL Counter-clockwise, same params as g02"),
         ("g2", "GRBL Clockwise, same params as g02"),
         ("$h", "GRBL return home"),
+        ("$g", "GRBL parser state request"),
         ("$x", "GRBL unlock"),
         ("$j", "GRBL jog, same x y params as g0"),
         ("$i", "GRBL info"),
         ("$$", "GRBL Settings"),
         ("?", "GRBL status report"),
+        ("$c", "GRBL check mode toggle"),
         ("$", "Help"),
         ("%", "Begin and end of file")
     )
 
-    logging.basicConfig(level=logging.INFO)
+    logging.basicConfig(level=logging.DEBUG)
     logger = get_logger("gcode_interpreter")
 
 
@@ -313,6 +319,9 @@ class GcodeInterpreter:
                 self.machine.absolute_x , self.machine.absolute_y, -1 if self.machine.is_pendown else 0
             )
 
+    def _send_state(self):
+        distance_mode = "G91" if self.machine.relative_mode else "G90"
+        self.io.write("[GC:G1 G54 G17 G2 {} G94 M5 M9 T0 S0.0 F500.0]\r\nok\r\n".format(distance_mode))
 
     def _banner(self):
 
@@ -483,7 +492,7 @@ class GcodeInterpreter:
 
     def _parse_command_params(self, sub_commands):
 
-        x = y = z = r = None
+        x = y = z = r = abs_mode = None
         for sub_command in sub_commands:
             if sub_command.startswith("x"):
                 x = float(sub_command[1:])
@@ -493,13 +502,27 @@ class GcodeInterpreter:
                 z = float(sub_command[1:])
             elif sub_command.startswith("r"):
                 r = float(sub_command[1:])
+            elif sub_command.startswith("g90"):
+                abs_mode = True
+            elif sub_command.startswith("g91"):
+                abs_mode = False
 
         if self.machine.relative_mode:
-            x = 0 if x is None else x
-            y = 0 if y is None else y
+            if abs_mode == True:
+                # Jog command can use a temp absolute mode when we are normally in relative mode.
+                x = self.machine.absolute_x if x is None else x - self.machine.absolute_x
+                y = self.machine.absolute_y if y is None else y - self.machine.absolute_y
+            else:
+                x = 0 if x is None else x
+                y = 0 if y is None else y
         else:
-            x = self.machine.absolute_x if x is None else x
-            y = self.machine.absolute_y if y is None else y
+            if abs_mode == False:
+                # Jog command can use a temp relatvie mode when we are normally in absolute mode.
+                x = self.machine.absolute_x + 0 if x is None else x
+                y = self.machine.absolute_y + 0 if y is None else y
+            else:
+                x = self.machine.absolute_x if x is None else x
+                y = self.machine.absolute_y if y is None else y
 
         return {'x': x, 'y': y, 'z': z, 'r': r}
 
@@ -507,6 +530,12 @@ class GcodeInterpreter:
 
         command = (command or "").split(';', 1)[0].rstrip().lower()  # Remove comments and trailing whitespace
         if not command: return
+
+        # some GRBL clients don't use spaces between command letters and parameters,
+        if len(command) > 2:
+            translation_table = str.maketrans({"g": " g", "x": " x", "y": " y", "z": " z", "r": " r", "f": " f","=": "= "})
+            command = command[0:2] + command[2:].translate(translation_table)  # Ensure spaces before command letters for splitting
+
         sub_commands = command.split()
 
         try:
@@ -514,6 +543,7 @@ class GcodeInterpreter:
         except ValueError:
             self.io.write(f"Unknown G-code command: {command}\r\n")
             return
+
         ## Originally I used enumStr matching for this, but it's not supported with MicroPython
         #     match sub_command:
         #        case GcodeInterpreter.GCodeCommands.G00 | GcodeInterpreter.GCodeCommands.G0 | GcodeInterpreter.GCodeCommands.JOG:
@@ -567,7 +597,10 @@ class GcodeInterpreter:
             raise KeyboardInterrupt
 
         elif sub_command == GcodeInterpreter.GCodeCommands.STATUS:
-            self._status()
+           self._status()
+
+        elif sub_command == GcodeInterpreter.GCodeCommands.CHECK:
+            self.io.write("ok\r\n")
 
         elif sub_command == GcodeInterpreter.GCodeCommands.SETTINGS:
             # Call instance method so it uses the configured io handler
@@ -581,6 +614,9 @@ class GcodeInterpreter:
 
         elif sub_command == GcodeInterpreter.GCodeCommands.UNLOCK:
             self._unlock()
+
+        elif sub_command == GcodeInterpreter.GCodeCommands.STATE:
+            self._send_state()
 
         else:
             self.io.write(f"Unknown G-code command: {command}")

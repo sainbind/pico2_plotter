@@ -31,17 +31,20 @@ class PySerialAdapter:
 turtle_machine = TurtleGCodeMachine(5,0,1000,1000, 50)
 # Slow it down so it is easier to see the movements
 turtle_machine.trace_mode(True)
-# Attach the gcode interpreter to the turtle machine
-#interpreter = GcodeInterpreter(turtle_machine)
 
-# Start serial ports using socat
-# socat -d -d PTY,link=/dev/ttyCNC,raw,echo=0,mode=666 PTY,link=/dev/ttyPY,raw,echo=0,mode=666
+
+# Start serial ports using socat and Univeral Gcode Sender (UGS) to send gcode commands from UGS to this script
+# socat -v -x  PTY,link=/tmp/ttyV0,raw,echo=0 PTY,link=/tmp/ttyV1,raw,echo=0 2>&1 | tee serial_log.txt
 #
 
-ser = PySerialAdapter('/tmp/ttyV1', 115200)
-io = UARTIO(ser)          # your UARTIO accepts an object with .any, .readline, .write
-# io = FileIO("./absolute.gcode")
-interpreter = GcodeInterpreter(turtle_machine, io, use_polling=True)
+isSerial = True
+if isSerial:
+    ser = PySerialAdapter('/tmp/ttyV0', 115200)
+    io = UARTIO(ser)          # your UARTIO accepts an object with .any, .readline, .write
+    # io = FileIO("./absolute.gcode")
+    interpreter = GcodeInterpreter(turtle_machine, io, use_polling=True)
+else:
+    interpreter = GcodeInterpreter(turtle_machine)
 
 # either manually type in gcode commands or read from standard input
 # absolute.gcode uses absolute positioning, relative.gcode uses relative positioning

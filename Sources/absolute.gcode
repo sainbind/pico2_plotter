@@ -5,7 +5,7 @@ G00 X0 Y0   ; Home
 
 ; Draw the square
 G00 X50 Y80  ; Move to starting position
-G01 X90 Y80  ; Move to right corner
+G01 X90 Y80 F500  ; Move to right corner
 G01 X90 Y40  ; Move to top-right corner
 G01 X50 Y40  ; Move to top-left corner
 G01 X50 Y80   ; Move back to origin
