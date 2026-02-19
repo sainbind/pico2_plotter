@@ -37,11 +37,14 @@ turtle_machine.trace_mode(True)
 # socat -v -x  PTY,link=/tmp/ttyV0,raw,echo=0 PTY,link=/tmp/ttyV1,raw,echo=0 2>&1 | tee serial_log.txt
 #
 
-isSerial = True
-if isSerial:
+action = "file"
+
+if action == "serial":
     ser = PySerialAdapter('/tmp/ttyV0', 115200)
     io = UARTIO(ser)          # your UARTIO accepts an object with .any, .readline, .write
-    # io = FileIO("./absolute.gcode")
+    interpreter = GcodeInterpreter(turtle_machine, io, use_polling=True)
+elif action == "file":
+    io = FileIO("./absolute.gcode")
     interpreter = GcodeInterpreter(turtle_machine, io, use_polling=True)
 else:
     interpreter = GcodeInterpreter(turtle_machine)

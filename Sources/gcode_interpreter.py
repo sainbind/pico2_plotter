@@ -526,16 +526,21 @@ class GcodeInterpreter:
 
         return {'x': x, 'y': y, 'z': z, 'r': r}
 
+    def split_and_separate_with_spaces(self, command):
+        replacements = {"g": " g", "x": " x", "y": " y", "z": " z", "r": " r", "f": " f", "=": "= "}
+        translation_table = str.maketrans(replacements)
+        result =  (command or "").split(';', 1)[0].rstrip().lower()  # Remove comments and trailing whitespace
+        if len(command) > 2:
+            ## translation_table = str.maketrans(replacements)
+            ## result = result[0:2] + result[2:].translate(translation_table)  # Ensure spaces before command letters for splitting
+            for key, value in replacements.items():
+                result = result.replace(key, value)
+        return result
+
     def gcode(self, command):
 
-        command = (command or "").split(';', 1)[0].rstrip().lower()  # Remove comments and trailing whitespace
+        command = self.split_and_separate_with_spaces(command)
         if not command: return
-
-        # some GRBL clients don't use spaces between command letters and parameters,
-        if len(command) > 2:
-            translation_table = str.maketrans({"g": " g", "x": " x", "y": " y", "z": " z", "r": " r", "f": " f","=": "= "})
-            command = command[0:2] + command[2:].translate(translation_table)  # Ensure spaces before command letters for splitting
-
         sub_commands = command.split()
 
         try:

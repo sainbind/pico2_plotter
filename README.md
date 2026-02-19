@@ -35,6 +35,12 @@ and another without MicroPython for testing the plotting logic using the turtle 
   * source .venv_turtle/bin/activate
   * pip install -r turtle_requirements.txt
   
+### Sources/turtule_main.py
+
+Change the action to either file, serial or other to run the plotter.
+* serial is setup to run using the Universal Gcode Sender app.
+* file loads the absolute.gcode file
+* other puts the plotter in interactive mode
 
 ### Sources/mplot_main.py
 
@@ -57,5 +63,4 @@ The plotter doesn't work reliably in absolute movement mode so I used the relati
 Even in relative mode, the lines are not perfectly straight, but it's good enough for my purposes.
 
 #### Next Steps
-I want to integrate with cncjs to control the plotter using a web interface.
-Perhaps look at a web based G-code sender that can be used with the plotter.
+I want to integrate with  using a web interface.
