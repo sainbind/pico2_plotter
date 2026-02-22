@@ -465,7 +465,7 @@ class GcodeInterpreter:
 
                 # Update last_question_time if this looks like a status request
                 stripped = (line or "").strip()
-                self.logger.debug("Line input: "+stripped)
+                self.logger.info("Line input: "+stripped)
                 if stripped.startswith("?"):
                     self.last_question_time = self.now
 

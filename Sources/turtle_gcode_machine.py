@@ -40,6 +40,16 @@ class TurtleGCodeMachine(GCodeMachine):
         else:
             self.screen.tracer(0, 10)
 
+    def is_window_open(self):
+        """Check if the turtle display window is still open"""
+        try:
+            # If the screen still has a getcanvas method and we can access it, window is open
+            if self.screen and self.screen.getcanvas():
+                return True
+        except Exception:
+            pass
+        return False
+
 
     def dot(self, point):
         """draw a dot at point"""
@@ -63,6 +73,8 @@ class TurtleGCodeMachine(GCodeMachine):
 
     def end(self):
         super().end()
+        # Setup a close handler for when user closes the window
+        self.screen.exitonclick()
         self.screen.mainloop()
 
     def home(self):

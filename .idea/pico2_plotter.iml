@@ -8,7 +8,7 @@
       <excludeFolder url="file://$MODULE_DIR$/.venv_turtle" />
       <excludeFolder url="file://$MODULE_DIR$/Extras" />
     </content>
-    <orderEntry type="jdk" jdkName="Python 3.14 (pico2_plotter)" jdkType="Python SDK" />
+    <orderEntry type="jdk" jdkName="Python 3.12 (pico2_plotter) (2)" jdkType="Python SDK" />
     <orderEntry type="sourceFolder" forTests="false" />
     <orderEntry type="library" name="MicroPythonToolsStubs" level="project" />
   </component>
