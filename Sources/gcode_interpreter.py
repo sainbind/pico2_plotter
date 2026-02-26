@@ -528,7 +528,7 @@ class GcodeInterpreter:
 
     def split_and_separate_with_spaces(self, command):
         replacements = {"g": " g", "x": " x", "y": " y", "z": " z", "r": " r", "f": " f", "=": "= "}
-        translation_table = str.maketrans(replacements)
+        # translation_table = str.maketrans(replacements)
         result =  (command or "").split(';', 1)[0].rstrip().lower()  # Remove comments and trailing whitespace
         if len(command) > 2:
             ## translation_table = str.maketrans(replacements)
@@ -561,6 +561,12 @@ class GcodeInterpreter:
             params = self._parse_command_params(sub_commands[1:])
             self.machine.penup()
             self.machine.move(params['x'], params['y'])
+            #support fine tunning on the pen
+            if GcodeInterpreter.GCodeCommands.JOG and params['z'] is not None:
+                if params['z'] > 0:
+                    self.machine.motor_z.move(40, 1)
+                else:
+                    self.machine.motor_z.move(abs(params['z']), -1)
             self.io.write("ok\r\n")
 
         elif sub_command in (GcodeInterpreter.GCodeCommands.G01,

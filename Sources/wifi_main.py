@@ -1,0 +1,151 @@
+import sys
+import io
+from stepper_gcode_machine import StepperGCodeMachine
+from gcode_interpreter import GcodeInterpreter, IOBase
+from microdot import Microdot
+
+
+class RestIO(IOBase):
+
+    def __init__(self, text_buffer: io.BytesIO):
+        # text_buffer is an in-memory bytes buffer (io.BytesIO)
+        self.text_buffer = text_buffer
+
+    def read_line(self, blocking=True):
+        # Emulate blocking/non-blocking behavior using tell/seek
+        try:
+            buf = self.text_buffer
+            if not blocking:
+                pos = buf.tell()
+                buf.seek(0, io.SEEK_END)
+                end = buf.tell()
+                buf.seek(pos)
+                if end <= pos:
+                    return None
+            raw = buf.readline()
+        except Exception:
+            return None
+
+        if not raw:
+            return None
+
+        # raw is bytes; decode to text and strip newline characters
+        try:
+            line = raw.decode('utf-8').rstrip('\r\n')
+        except Exception:
+            line = raw.decode('utf-8', errors='ignore').rstrip('\r\n')
+        return line
+
+    def write(self, s: str  ):
+        try:
+            sys.stdout.write(s)
+        except Exception:
+            pass
+
+    def any(self) -> bool:
+        try:
+            buf = self.text_buffer
+            pos = buf.tell()
+            buf.seek(0, io.SEEK_END)
+            end = buf.tell()
+            buf.seek(pos)
+            return end > pos
+        except Exception:
+            return True
+
+class RestSerialServer:
+
+    def __init__(self, text_buffer: io.BytesIO):
+        # store the bytes buffer (do NOT shadow the io module name)
+        self.text_buffer = text_buffer
+        self.port = 5000
+        self.app = Microdot()
+
+    # Shared helper: append text (plain UTF-8) to the underlying bytes buffer.
+    def _append_text(self, text: str) -> int:
+        """Append lines from `text` to the bytes buffer as UTF-8 lines.
+        Returns the number of bytes written.
+        """
+        if not text:
+            return 0
+        buf = self.text_buffer
+        buf.seek(0, io.SEEK_END)
+        written = 0
+        for line in text.split('\n'):
+            if line:
+                b = (line + '\n').encode('utf-8')
+                buf.write(b)
+                written += len(b)
+        return written
+
+    # Shared helper: read a single line from the buffer and decode to UTF-8
+    def _readline_decoded(self):
+        buf = self.text_buffer
+        raw = buf.readline() or b""
+        if not raw:
+            return None
+        try:
+            return raw.decode('utf-8').rstrip('\r\n')
+        except Exception:
+            return raw.decode('utf-8', errors='ignore').rstrip('\r\n')
+
+    def _register_routes(self):
+        app = self.app
+        server = self
+
+        @app.route("/run", methods=["GET"])
+        def readline_route():
+            try:
+                line = server._readline_decoded()
+                if line is not None:
+                    #return jsonify(result='OK', data=line), 200
+                    return line, 200, {'Content-Type': 'text/html'}
+                else:
+                    #return jsonify(result='OK', data=''), 200
+                    return 'OK', 200, {'Content-Type': 'text/html'}
+            except Exception as e:
+                #return jsonify(error=str(e)), 500
+                return e, 500, {'Content-Type': 'text/html'}
+
+
+        @app.route("/run_all", methods=["POST"])
+        def readlines_route(request):
+            try:
+                # Request body is plain text with newlines embedded
+                text = request.body.decode('utf-8') if isinstance(request.body, bytes) else str(request.body)
+                written = server._append_text(text)
+                #return jsonify(result='OK', written=written), 200
+                return written, 200, {'Content-Type': 'text/html'}
+            except Exception as e:
+                #return jsonify(error=str(e)), 500
+                return e, 500, {'Content-Type': 'text/html'}
+
+    def run(self, debug=False):
+        #self.app.run(host=self.host, port=self.port, debug=debug, threaded=True)
+        if self.app is None:
+            raise RuntimeError("Microdot is not installed. Install it with: pip install microdot")
+        self.app.run(debug=debug, port=self.port)
+
+
+def create_rest_server(text_buffer: io.BytesIO = None, run=False, debug=False):
+    """Factory to create the RestSerialServer along with a GcodeInterpreter and backing buffer.
+    Returns (rest_server, interpreter, text_buffer).
+    If text_buffer is None, a new io.BytesIO preloaded with '?\n' is created.
+    If run is True, the server's run() will be invoked (blocking).
+    """
+    if text_buffer is None:
+        text_buffer = io.BytesIO(b"?\n")
+    stepper_machine = StepperGCodeMachine(11, 1500)
+    interpreter = GcodeInterpreter(stepper_machine, RestIO(text_buffer))
+    rest_server = RestSerialServer(text_buffer)
+    if run:
+        rest_server.run(debug=debug)
+    return rest_server, interpreter, text_buffer
+
+
+if __name__ == "__main__":
+    print("Starting REST server with G-code interpreter...")
+    rest_server, interpreter, text_buffer = create_rest_server(run=True, debug=True)
+    print("Ending REST server with G-code interpreter...")
+else:
+    create_rest_server(run=True, debug=True)

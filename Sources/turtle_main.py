@@ -34,7 +34,8 @@ turtle_machine = TurtleGCodeMachine(5,0,1000,1000, 50)
 turtle_machine.trace_mode(True)
 
 # Start serial ports using socat and Univeral Gcode Sender (UGS) to send gcode commands from UGS to this script
-# socat -v -x  PTY,link=/tmp/ttyV0,raw,echo=0 PTY,link=/tmp/ttyV1,raw,echo=0 2>&1 | tee serial_log.txt
+# Linux: sudo socat -d -d  PTY,link=/dev/ttyCNC,raw,echo=0,mode=666  PTY,link=/dev/ttyPY,raw,echo=0,mode=666
+# Mac:   socat -v -x  PTY,link=/tmp/ttyV0,raw,echo=0 PTY,link=/tmp/ttyV1,raw,echo=0 2>&1 | tee serial_log.txt
 #
 
 def main(action="serial"):
@@ -48,7 +49,7 @@ def main(action="serial"):
         io = FileIO("./absolute.gcode")
         interpreter = GcodeInterpreter(turtle_machine, io, use_polling=False)
     elif action == 'serial':
-        ser = PySerialAdapter('/dev/ttyPY', 115200)
+        ser = PySerialAdapter('/tmp/ttyV0', 115200)
         io = UARTIO(ser)          # your UARTIO accepts an object with .any, .readline, .write
         interpreter = GcodeInterpreter(turtle_machine, io, use_polling=True)
     else:

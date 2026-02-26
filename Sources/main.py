@@ -29,13 +29,29 @@ def get_gcode_interpreter(uart=None):
         print("Error loading file for input: "+str(e))
         return None
 
+stepper_machine = StepperGCodeMachine(11, 1500)
 
-uart = None
-#uart = machine.UART(0, baudrate=115200, tx=17, rx=16)
-#os.dupterm(uart)  # keep REPL / prints duplicated to the UART
-interpreter = get_gcode_interpreter(uart)
-interpreter.interpret()
+def main(action="serial"):
+    """
+    Main function for running drawing gcode using Turtle Graphics.
+    Args:
+        action: str - Type of input mode ('file', 'serial', or None for interactive)
+    """
 
-# similar results can be achieved by directly calling the drawing functions
-# without going through the gcode interpreter
-#relative_draw(stepper_machine)
+    if action == 'file':
+        io = FileIO("./absolute.gcode")
+        interpreter = GcodeInterpreter(stepper_machine, io, use_polling=False)
+    elif action == 'serial':
+        uart = machine.UART(0, baudrate=115200, tx=17, rx=16)
+        os.dupterm(uart)            # keep REPL / prints duplicated to the UART
+        io = UARTIO(uart)          # your UARTIO accepts an object with .any, .readline, .write
+        interpreter = GcodeInterpreter(stepper_machine, io, use_polling=True)
+    else:
+        interpreter = GcodeInterpreter(stepper_machine)
+
+    interpreter.interpret()
+
+if __name__ == "__main__":
+    # Get action from command-line argument or use default "file"
+    action = sys.argv[1] if len(sys.argv) > 1 else "xfile"
+    #main(action)
