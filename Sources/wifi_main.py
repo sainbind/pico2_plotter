@@ -3,6 +3,7 @@ import io
 from stepper_gcode_machine import StepperGCodeMachine
 from gcode_interpreter import GcodeInterpreter, IOBase
 from microdot import Microdot
+import network
 
 
 class RestIO(IOBase):
@@ -17,7 +18,7 @@ class RestIO(IOBase):
             buf = self.text_buffer
             if not blocking:
                 pos = buf.tell()
-                buf.seek(0, io.SEEK_END)
+                buf.seek(0, 2) # 2 is SEEK_END
                 end = buf.tell()
                 buf.seek(pos)
                 if end <= pos:
@@ -46,7 +47,7 @@ class RestIO(IOBase):
         try:
             buf = self.text_buffer
             pos = buf.tell()
-            buf.seek(0, io.SEEK_END)
+            buf.seek(0, 2) # 2 is SEEK_END
             end = buf.tell()
             buf.seek(pos)
             return end > pos
@@ -69,7 +70,7 @@ class RestSerialServer:
         if not text:
             return 0
         buf = self.text_buffer
-        buf.seek(0, io.SEEK_END)
+        buf.seek(0, 2) # 2 is SEEK_END
         written = 0
         for line in text.split('\n'):
             if line:
@@ -93,19 +94,23 @@ class RestSerialServer:
         app = self.app
         server = self
 
+        @app.route('/')
+        async def index(request):
+            return 'Ready to support /run or /run_all'
+
         @app.route("/run", methods=["GET"])
-        def readline_route():
+        def readline_route(request):
             try:
                 line = server._readline_decoded()
                 if line is not None:
                     #return jsonify(result='OK', data=line), 200
-                    return line, 200, {'Content-Type': 'text/html'}
+                    return line, 200, {'Content-Type': 'text/plain'}
                 else:
                     #return jsonify(result='OK', data=''), 200
-                    return 'OK', 200, {'Content-Type': 'text/html'}
+                    return 'OK', 200, {'Content-Type': 'text/plain'}
             except Exception as e:
                 #return jsonify(error=str(e)), 500
-                return e, 500, {'Content-Type': 'text/html'}
+                return str(e), 500, {'Content-Type': 'text/plain'}
 
 
         @app.route("/run_all", methods=["POST"])
@@ -113,15 +118,16 @@ class RestSerialServer:
             try:
                 # Request body is plain text with newlines embedded
                 text = request.body.decode('utf-8') if isinstance(request.body, bytes) else str(request.body)
+                print("request is\n"+text)
                 written = server._append_text(text)
                 #return jsonify(result='OK', written=written), 200
-                return written, 200, {'Content-Type': 'text/html'}
+                return "OK", 200, {'Content-Type': 'text/plain'}
             except Exception as e:
                 #return jsonify(error=str(e)), 500
-                return e, 500, {'Content-Type': 'text/html'}
+                return str(e), 500, {'Content-Type': 'text/plain'}
 
     def run(self, debug=False):
-        #self.app.run(host=self.host, port=self.port, debug=debug, threaded=True)
+        self._register_routes()
         if self.app is None:
             raise RuntimeError("Microdot is not installed. Install it with: pip install microdot")
         self.app.run(debug=debug, port=self.port)
@@ -144,8 +150,12 @@ def create_rest_server(text_buffer: io.BytesIO = None, run=False, debug=False):
 
 
 if __name__ == "__main__":
+    wlan = network.WLAN(network.STA_IF)
+    wlan.active(True)
+    wlan.connect('Scott Stamford', 'charmatt')
+    status = wlan.ifconfig()
+    print("IP: " + status[0])
+    #wlan.disconnect()
     print("Starting REST server with G-code interpreter...")
     rest_server, interpreter, text_buffer = create_rest_server(run=True, debug=True)
     print("Ending REST server with G-code interpreter...")
-else:
-    create_rest_server(run=True, debug=True)
