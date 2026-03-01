@@ -291,6 +291,8 @@ class GcodeInterpreter:
         # IO handler: default to standard input/output
         self.io = io_handler if io_handler is not None else StdioIO()
 
+        logging.info(f"G-code interpreter initialized, polling={'enabled' if use_polling else 'disabled'}, io_handler={type(self.io).__name__}")
+
         # Prepare polling support if requested and supported by the IO handler
         if use_polling:
             # If the io handler exposes a fileno usable with select.poll(), register it
@@ -416,7 +418,7 @@ class GcodeInterpreter:
 
 
     def interpret(self):
-
+        self.logger.info("Interpreting G-code...")
         try:
             while True:
                 self.now = tick_millis()
@@ -441,7 +443,7 @@ class GcodeInterpreter:
                     line = self.io.read_line(blocking=False)
                     if line is None:
                         # EOF on stdin or no data
-                        self.logger.debug("EOF on input, exiting interpreter")
+                        self.logger.info("EOF on input polling, exiting interpreter")
                         break
                 else:
                     # If we have a non-poller IO, use its any() to check availability
@@ -453,12 +455,14 @@ class GcodeInterpreter:
                                 self.last_status_time = self.now
                             sleep_secs(0.01)
                             continue
+                        print("About to read line in non-polling mode...")
                         line = self.io.read_line(blocking=False)
                         if line is None:
-                            self.logger.debug("EOF on input, exiting interpreter")
+                            self.logger.info("EOF on input non polling, exiting interpreter")
                             break
                     else:
                         # Blocking read; will wait for a line from the host
+                        print("Blocking read for line input...")
                         line = self.io.read_line(blocking=True)
                         if line is None:
                             break

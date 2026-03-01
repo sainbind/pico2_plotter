@@ -1,8 +1,10 @@
 import sys
 import io
+import asyncio
 from stepper_gcode_machine import StepperGCodeMachine
 from gcode_interpreter import GcodeInterpreter, IOBase
 from microdot import Microdot
+
 import network
 
 
@@ -12,29 +14,56 @@ class RestIO(IOBase):
         # text_buffer is an in-memory bytes buffer (io.BytesIO)
         self.text_buffer = text_buffer
 
-    def read_line(self, blocking=True):
-        # Emulate blocking/non-blocking behavior using tell/seek
+    def read_line(self, blocking=False):
+        """Read a single line from the underlying BytesIO and return a decoded
+        string (without trailing CR/LF). For non-blocking calls, return None if
+        no complete line is available. For blocking calls, wait until a line
+        becomes available.
+        """
+        buf = self.text_buffer
         try:
-            buf = self.text_buffer
             if not blocking:
+                print("Not blocking, Checking for available data in buffer...")
+                # If no data available beyond current position, return None
                 pos = buf.tell()
-                buf.seek(0, 2) # 2 is SEEK_END
+                buf.seek(0, 2)  # SEEK_END
                 end = buf.tell()
                 buf.seek(pos)
                 if end <= pos:
                     return None
-            raw = buf.readline()
-        except Exception:
+                # There is data; attempt to read a line
+                raw = buf.readline()
+            else:
+                # Blocking: wait until a newline-terminated line is available
+                print("blocking, Waiting for available data in buffer...")
+                raw = buf.readline()
+                if not raw or raw.endswith(b"\n") is False:
+                    # If readline returned empty bytes (no data yet) or returned
+                    # a partial line (shouldn't happen for BytesIO), loop/wait
+                    import time
+                    while True:
+                        pos = buf.tell()
+                        buf.seek(0, 2)
+                        end = buf.tell()
+                        buf.seek(pos)
+                        if end > pos:
+                            raw = buf.readline()
+                            if raw:
+                                break
+                        time.sleep(0.01)
+        except Exception as e:
+            print("Error reading from buffer:", e)
             return None
 
         if not raw:
             return None
 
-        # raw is bytes; decode to text and strip newline characters
+        # Decode bytes to text and strip trailing newlines
         try:
             line = raw.decode('utf-8').rstrip('\r\n')
         except Exception:
             line = raw.decode('utf-8', errors='ignore').rstrip('\r\n')
+
         return line
 
     def write(self, s: str  ):
@@ -52,7 +81,7 @@ class RestIO(IOBase):
             buf.seek(pos)
             return end > pos
         except Exception:
-            return True
+            return False
 
 class RestSerialServer:
 
@@ -99,7 +128,7 @@ class RestSerialServer:
             return 'Ready to support /run or /run_all'
 
         @app.route("/run", methods=["GET"])
-        def readline_route(request):
+        async def readline_route(request):
             try:
                 line = server._readline_decoded()
                 if line is not None:
@@ -114,12 +143,13 @@ class RestSerialServer:
 
 
         @app.route("/run_all", methods=["POST"])
-        def readlines_route(request):
+        async def readlines_route(request):
             try:
                 # Request body is plain text with newlines embedded
                 text = request.body.decode('utf-8') if isinstance(request.body, bytes) else str(request.body)
                 print("request is\n"+text)
                 written = server._append_text(text)
+                print(f"Appended {written} bytes to buffer")
                 #return jsonify(result='OK', written=written), 200
                 return "OK", 200, {'Content-Type': 'text/plain'}
             except Exception as e:
@@ -127,25 +157,26 @@ class RestSerialServer:
                 return str(e), 500, {'Content-Type': 'text/plain'}
 
     def run(self, debug=False):
-        self._register_routes()
+        # Ensure routes are registered before running
+        try:
+            self._register_routes()
+        except Exception:
+            pass
+
         if self.app is None:
             raise RuntimeError("Microdot is not installed. Install it with: pip install microdot")
+
         self.app.run(debug=debug, port=self.port)
 
 
-def create_rest_server(text_buffer: io.BytesIO = None, run=False, debug=False):
-    """Factory to create the RestSerialServer along with a GcodeInterpreter and backing buffer.
-    Returns (rest_server, interpreter, text_buffer).
-    If text_buffer is None, a new io.BytesIO preloaded with '?\n' is created.
-    If run is True, the server's run() will be invoked (blocking).
-    """
+def create_rest_server(text_buffer: io.BytesIO = None, use_polling=True):
+
     if text_buffer is None:
-        text_buffer = io.BytesIO(b"?\n")
+        text_buffer = io.BytesIO(b"?\r\n")
     stepper_machine = StepperGCodeMachine(11, 1500)
-    interpreter = GcodeInterpreter(stepper_machine, RestIO(text_buffer))
+    interpreter = GcodeInterpreter(stepper_machine, RestIO(text_buffer),use_polling=use_polling)
     rest_server = RestSerialServer(text_buffer)
-    if run:
-        rest_server.run(debug=debug)
+    #rest_server.run()
     return rest_server, interpreter, text_buffer
 
 
@@ -155,7 +186,19 @@ if __name__ == "__main__":
     wlan.connect('Scott Stamford', 'charmatt')
     status = wlan.ifconfig()
     print("IP: " + status[0])
-    #wlan.disconnect()
-    print("Starting REST server with G-code interpreter...")
-    rest_server, interpreter, text_buffer = create_rest_server(run=True, debug=True)
+
+    text_buffer = io.BytesIO(b"?\r\n")
+    rest_server, interpreter, text_buffer = create_rest_server(text_buffer=text_buffer, use_polling=True)
+    loop = asyncio.get_event_loop()
+
+    if loop is not None:
+        loop.create_task(interpreter.interpret())
+        print("Starting REST server in async mode...")
+        rest_server.run(debug=True)
+    else:
+        print("Starting rest server...")
+        rest_server.run()
+        print("Starting G-code interpreter...")
+        interpreter.interpret()
     print("Ending REST server with G-code interpreter...")
+    print("Text Buffer content:\n" + text_buffer.getvalue().decode('utf-8'))
