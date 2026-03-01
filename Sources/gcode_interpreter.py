@@ -323,26 +323,23 @@ class GcodeInterpreter:
 
     def _send_state(self):
         distance_mode = "G91" if self.machine.relative_mode else "G90"
-        self.io.write("[GC:G1 G54 G17 G2 {} G94 M5 M9 T0 S0.0 F500.0]\r\nok\r\n".format(distance_mode))
+        return "[GC:G1 G54 G17 G2 {} G94 M5 M9 T0 S0.0 F500.0]\r\nok\r\n".format(distance_mode)
 
     def _banner(self):
 
         # Send the banner plus three status reports and trailing ok.
         statuses = "".join(self._send_status() for _ in range(3))
         banner = "Grbl 1.1f ['$' for help]\r\n<Idle|MPos:0.000,0.000,0.000|FS:0,0>\r\nMSG: '$X' to unlock]\r\n"
-        self.io.write(banner + statuses + "ok\r\n")
+        result= banner + statuses + "ok\r\n"
         self.banner_sent = True
         self.last_status_time = tick_millis()
+        return result
 
     def _soft_reset(self):
         self.banner_sent = False
 
     def _unlock(self):
-        try:
-            # If there is a running interpreter instance, prefer its io; otherwise stdout
-            self.io.write("[MSG:Caution: Unlocked]\r\nok\r\n")
-        except Exception:
-            pass
+            return "[MSG:Caution: Unlocked]\r\nok\r\n"
 
 
     def _settings(self):
@@ -371,26 +368,22 @@ class GcodeInterpreter:
             (31, 0, "Min spindle speed, RPM"),
             (32, 1, "Laser-mode enable, bool"),
         )
-        # This static method can't easily access self.io; write to stdout here.
-        try:
-            self.io.write("".join(f"${key}={val} ({desc})\r\n" for (key, val, desc) in grbl_settings) + "ok\r\n")
-        except Exception:
-            pass
+
+        return "".join(f"${key}={val} ({desc})\r\n" for (key, val, desc) in grbl_settings) + "ok\r\n"
+
 
 
     def _help(self):
-        try:
-            self.io.write( "".join(f"{key}: {value}\r\n" for (key, value) in GcodeInterpreter.commands))
-        except Exception:
-            pass
+
+        return "".join(f"{key}: {value}\r\n" for (key, value) in GcodeInterpreter.commands)
+
 
     def _info(self):
-        try:
-            self.io.write("[VER:MicroPythonGRBL:1.1]\r\n")
-            self.io.write("[OPT:MPY,USB,3AXIS]\r\n")
-            self.io.write("ok\r\n")
-        except Exception:
-            pass
+
+        result = "[VER:MicroPythonGRBL:1.1]\r\n"
+        result += "[OPT:MPY,USB,3AXIS]\r\n"
+        result += "ok\r\n"
+        return result
 
     def _status(self):
         # Determine if this '?' arrived within the quick-request window
@@ -407,14 +400,15 @@ class GcodeInterpreter:
 
         # On the second quick `?`, fire the banner if needed
         if not self.banner_sent and self.question_counter >= 2:
-            self._banner()
+            result = self._banner()
             self.question_counter = 0
-            return
+            return result
 
         # After banner has been shown, throttle status replies by STATUS_INTERVAL_MS
         if self.banner_sent and ticks_diff(self.now, self.last_status_time) > GcodeInterpreter.STATUS_INTERVAL_MS:
-            self.io.write(self._send_status())
+            result = self._send_status()
             self.last_status_time = self.now
+            return result
 
 
     def interpret(self):
@@ -430,6 +424,7 @@ class GcodeInterpreter:
 
                 # Non-blocking mode: check for input, otherwise allow periodic tasks
                 if self.use_polling and self.poller is not None:
+                    #self.logger.info("Polling with self poller")
                     events = self.poller.poll(0)
                     if not events:
                         # Optionally emit periodic idle status after banner
@@ -447,7 +442,9 @@ class GcodeInterpreter:
                         break
                 else:
                     # If we have a non-poller IO, use its any() to check availability
+
                     if self.use_polling and self.poller is None:
+                        #self.logger.info("Polling without self poller")
                         if not self.io.any():
                             # Optionally emit periodic idle status after banner
                             if self.banner_sent and ticks_diff(self.now, self.last_status_time) > GcodeInterpreter.STATUS_INTERVAL_MS:
@@ -455,28 +452,31 @@ class GcodeInterpreter:
                                 self.last_status_time = self.now
                             sleep_secs(0.01)
                             continue
-                        print("About to read line in non-polling mode...")
+                        #self.logger.info("About to read line in polling mode without poller...")
                         line = self.io.read_line(blocking=False)
+                        sleep_secs(0.01)
                         if line is None:
                             self.logger.info("EOF on input non polling, exiting interpreter")
                             break
+
                     else:
                         # Blocking read; will wait for a line from the host
-                        print("Blocking read for line input...")
+                        sleep_secs(0.01)
+                        #self.logger.info("Blocking read for line input...")
                         line = self.io.read_line(blocking=True)
                         if line is None:
                             break
 
                 # Update last_question_time if this looks like a status request
                 stripped = (line or "").strip()
-                self.logger.info("Line input: "+stripped)
                 if stripped.startswith("?"):
                     self.last_question_time = self.now
 
                 # Dispatch the line to the gcode handler
                 try:
                     if stripped:
-                        self.gcode(stripped)
+                        result = self.gcode(stripped)
+                        self.io.write(result)
                 except KeyboardInterrupt:
                     break
                 except Exception as e:
@@ -546,12 +546,13 @@ class GcodeInterpreter:
         command = self.split_and_separate_with_spaces(command)
         if not command: return
         sub_commands = command.split()
+        result = ""
 
         try:
             sub_command = GcodeInterpreter.GCodeCommands.get_command(sub_commands[0])
         except ValueError:
-            self.io.write(f"Unknown G-code command: {command}\r\n")
-            return
+             return f"Unknown G-code command: {command}\r\n"
+
 
         ## Originally I used enumStr matching for this, but it's not supported with MicroPython
         #     match sub_command:
@@ -571,70 +572,69 @@ class GcodeInterpreter:
                     self.machine.motor_z.move(40, 1)
                 else:
                     self.machine.motor_z.move(abs(params['z']), -1)
-            self.io.write("ok\r\n")
+            result = "ok\r\n"
 
         elif sub_command in (GcodeInterpreter.GCodeCommands.G01,
                              GcodeInterpreter.GCodeCommands.G1):
             params = self._parse_command_params(sub_commands[1:])
             self.machine.pendown()
             self.machine.move(params['x'], params['y'])
-            self.io.write("ok\r\n")
+            result = "ok\r\n"
 
         elif sub_command in (GcodeInterpreter.GCodeCommands.G02,
                              GcodeInterpreter.GCodeCommands.G2):
             params = self._parse_command_params(sub_commands[1:])
             self.machine.circle(Point(params['x'], params['y']), params['r'], is_clockwise=True)
-            self.io.write("ok\r\n")
+            result = "ok\r\n"
 
         elif sub_command in (GcodeInterpreter.GCodeCommands.G03,
                              GcodeInterpreter.GCodeCommands.G3):
             params = self._parse_command_params(sub_commands[1:])
             self.machine.circle(Point(params['x'], params['y']), params['r'], is_clockwise=False)
-            self.io.write("ok\r\n")
+            result = "ok\r\n"
 
         elif sub_command == GcodeInterpreter.GCodeCommands.G21:
-            self.io.write("ok\r\n")
+            result = "ok\r\n"
 
         elif sub_command in (GcodeInterpreter.GCodeCommands.G28,
                              GcodeInterpreter.GCodeCommands.HOME):
             self.machine.home()
-            self.io.write("ok\r\n")
+            result = "ok\r\n"
 
         elif sub_command == GcodeInterpreter.GCodeCommands.G90:
             self.machine.relative_mode = False
-            self.io.write("ok\r\n")
+            result = "ok\r\n"
 
         elif sub_command == GcodeInterpreter.GCodeCommands.G91:
             self.machine.relative_mode = True
-            self.io.write("ok\r\n")
+            result = "ok\r\n"
 
         elif sub_command == GcodeInterpreter.GCodeCommands.M30:
             raise KeyboardInterrupt
 
         elif sub_command == GcodeInterpreter.GCodeCommands.STATUS:
-           self._status()
+           sult = self._status()
 
         elif sub_command == GcodeInterpreter.GCodeCommands.CHECK:
-            self.io.write("ok\r\n")
+            result = "ok\r\n"
 
         elif sub_command == GcodeInterpreter.GCodeCommands.SETTINGS:
             # Call instance method so it uses the configured io handler
-            self._settings()
+            result =self._settings()
 
         elif sub_command == GcodeInterpreter.GCodeCommands.INFO:
-            self._info()
+            result = self._info()
 
         elif sub_command == GcodeInterpreter.GCodeCommands.HELP:
-            self._help()
+            result = self._help()
 
         elif sub_command == GcodeInterpreter.GCodeCommands.UNLOCK:
-            self._unlock()
+            result = self._unlock()
 
         elif sub_command == GcodeInterpreter.GCodeCommands.STATE:
-            self._send_state()
+            result = "ok\r\n"
 
         else:
-            self.io.write(f"Unknown G-code command: {command}")
+            result =  f"Unknown G-code command: {command}"
 
-
-
+        return result

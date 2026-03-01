@@ -62,5 +62,10 @@ It reads G-code commands from standard input and controls the stepper motors acc
 The plotter doesn't work reliably in absolute movement mode so I used the relative mode.
 Even in relative mode, the lines are not perfectly straight, but it's good enough for my purposes.
 
-#### Next Steps
-I want to integrate with  using a web interface.
+#### Sources/wifi_main.py
+
+The main program creates a rest server running on pico
+You can use curl to send one or more commands separated by newlines to the plotter. For example:
+* curl http://192.168.1.189:5000/run_all -d'?\nG1X10Y10\nG1Z-30'
+*  curl http://192.168.1.189:5000/run_all -d'$'
+*  curl http://192.168.1.189:5000/run_all -d'$j=G1Z1'
