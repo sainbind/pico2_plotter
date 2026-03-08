@@ -26,6 +26,13 @@ class GCodeMachine:
     def line(self, end_point):
         start_point = self.current_point()
         ending_point = end_point.add(start_point) if self.relative_mode else end_point
+
+        # Optimization: if line is effectively horizontal or vertical, just move to the endpoint without bresenham sampling
+        if ending_point.x == start_point.x or ending_point.y == start_point.y:
+            next_point = ending_point.subtract(self.current_point()) if self.relative_mode else end_point
+            self.move(next_point.x, next_point.y)
+            return
+
         self.logger.debug("Line start: %s, end: %s, point: %s", start_point, ending_point, end_point)
         points = start_point.bresenham_line(ending_point, self.line_increment)
         for point in points:

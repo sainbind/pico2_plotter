@@ -46,7 +46,8 @@ def main(action="serial"):
         action: str - Type of input mode ('file', 'serial', or None for interactive)
     """
     if action == 'file':
-        io = FileIO("./absolute.gcode")
+        io = FileIO("./relative.gcode")
+        #io = FileIO("./absolute.gcode")
         interpreter = GcodeInterpreter(turtle_machine, io, use_polling=False)
     elif action == 'serial':
         ser = PySerialAdapter('/tmp/ttyV0', 115200)
@@ -56,6 +57,7 @@ def main(action="serial"):
         interpreter = GcodeInterpreter(turtle_machine)
 
     interpreter.interpret()
+
 
 
 

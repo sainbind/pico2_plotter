@@ -23,7 +23,7 @@ class Motor:
         (1, 0, 0, 1)
     ]
 
-    def __init__(self, name, delay_us, mode='full', endstop_direction = None, max_steps = 1200):
+    def __init__(self, name, delay_us, mode='half', endstop_direction = None, max_steps = 1200):
         self.name = name
         self.endstop_direction = endstop_direction
         self.max_steps = max_steps
@@ -110,7 +110,7 @@ class StepperGCodeMachine(GCodeMachine):
         super().__init__(steps_per_mm, step_delay_us)
         self.motor_y = StepperMotor("Y", 0, 1, 2, 3, delay_us=1500, mode='half', endstop_pin=15, endstop_direction=1)
         self.motor_x = StepperMotor("X", 4, 5, 6, 7, delay_us=1500, mode='half', endstop_pin=14, endstop_direction=-1)
-        self.motor_z = StepperMotor("Z", 8, 9, 10, 11)
+        self.motor_z = StepperMotor("Z", 8, 9, 10, 11, delay_us=1500, mode='half')
         self.is_pendown = False
         self.home()
         # may need to adjust as 0
@@ -157,11 +157,13 @@ class StepperGCodeMachine(GCodeMachine):
 
     def penup(self):
         if self.is_pendown:
+            print("\tPen up")
             self.is_pendown = False
             self.motor_z.move(40, -1)
 
     def pendown(self):
         if not self.is_pendown:
+            print("\tPen down")
             self.is_pendown = True
             self.motor_z.move(40, 1)
 

@@ -35,7 +35,7 @@ and another without MicroPython for testing the plotting logic using the turtle 
   * source .venv_turtle/bin/activate
   * pip install -r turtle_requirements.txt
   
-### Sources/turtule_main.py
+### Sources/pico_main.py
 
 Change the action to either file, serial or other to run the plotter.
 * serial is setup to run using the Universal Gcode Sender app.
@@ -62,10 +62,17 @@ It reads G-code commands from standard input and controls the stepper motors acc
 The plotter doesn't work reliably in absolute movement mode so I used the relative mode.
 Even in relative mode, the lines are not perfectly straight, but it's good enough for my purposes.
 
-#### Sources/wifi_main.py
+#### Sources/main.py
 
 The main program creates a rest server running on pico
 You can use curl to send one or more commands separated by newlines to the plotter. For example:
 * curl http://192.168.1.189:5000/run_all -d'?\nG1X10Y10\nG1Z-30'
 *  curl http://192.168.1.189:5000/run_all -d'$'
 *  curl http://192.168.1.189:5000/run_all -d'$j=G1Z1'
+
+#### Sources/post_client.py
+
+A simple client program that sends G-code commands to the plotter's REST server.
+To run, use the virtual environment with MicroPython installed:
+* source .venv/bin/activate
+* python post_client.py

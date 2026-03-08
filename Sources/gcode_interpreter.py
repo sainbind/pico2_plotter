@@ -266,7 +266,7 @@ class GcodeInterpreter:
         ("$h", "GRBL return home"),
         ("$g", "GRBL parser state request"),
         ("$x", "GRBL unlock"),
-        ("$j", "GRBL jog, same x y params as g0"),
+        ("$j", "GRBL jog, same x y params as g0, support for z with positive for pen up and negative for pen down"),
         ("$i", "GRBL info"),
         ("$$", "GRBL Settings"),
         ("?", "GRBL status report"),
@@ -506,10 +506,9 @@ class GcodeInterpreter:
                 z = float(sub_command[1:])
             elif sub_command.startswith("r"):
                 r = float(sub_command[1:])
-            elif sub_command.startswith("g90"):
+            elif sub_command.startswith("$j="):
                 abs_mode = True
-            elif sub_command.startswith("g91"):
-                abs_mode = False
+
 
         if self.machine.relative_mode:
             if abs_mode == True:
@@ -520,8 +519,8 @@ class GcodeInterpreter:
                 x = 0 if x is None else x
                 y = 0 if y is None else y
         else:
-            if abs_mode == False:
-                # Jog command can use a temp relatvie mode when we are normally in absolute mode.
+            if abs_mode == True:
+                # Jog command can use a temp relative mode when we are normally in absolute mode.
                 x = self.machine.absolute_x + 0 if x is None else x
                 y = self.machine.absolute_y + 0 if y is None else y
             else:
@@ -569,7 +568,7 @@ class GcodeInterpreter:
             #support fine tunning on the pen
             if GcodeInterpreter.GCodeCommands.JOG and params['z'] is not None:
                 if params['z'] > 0:
-                    self.machine.motor_z.move(40, 1)
+                    self.machine.motor_z.move(abs(params['z']), 1)
                 else:
                     self.machine.motor_z.move(abs(params['z']), -1)
             result = "ok\r\n"
@@ -578,18 +577,21 @@ class GcodeInterpreter:
                              GcodeInterpreter.GCodeCommands.G1):
             params = self._parse_command_params(sub_commands[1:])
             self.machine.pendown()
-            self.machine.move(params['x'], params['y'])
+            self.machine.line( Point(params['x'], params['y']))
+            #self.machine.move(params['x'], params['y'])
             result = "ok\r\n"
 
         elif sub_command in (GcodeInterpreter.GCodeCommands.G02,
                              GcodeInterpreter.GCodeCommands.G2):
             params = self._parse_command_params(sub_commands[1:])
+            self.machine.pendown()
             self.machine.circle(Point(params['x'], params['y']), params['r'], is_clockwise=True)
             result = "ok\r\n"
 
         elif sub_command in (GcodeInterpreter.GCodeCommands.G03,
                              GcodeInterpreter.GCodeCommands.G3):
             params = self._parse_command_params(sub_commands[1:])
+            self.machine.pendown()
             self.machine.circle(Point(params['x'], params['y']), params['r'], is_clockwise=False)
             result = "ok\r\n"
 
